@@ -12,3 +12,15 @@ Route::get('/game/stage/{stage}/level/{level}', [GameController::class, 'showLev
 
 Route::post('/game/stage/{stage}/level/{level}', [GameController::class, 'submitLevel'])
     ->name('game.level.submit');
+
+/* --- halaman konfirmasi pembayaran QRIS untuk unlock level berikutnya --- */
+Route::get('/game/unlock/{fromStage}/{fromLevel}/{toStage}/{toLevel}', [GameController::class, 'showUnlock'])
+    ->name('game.unlock.show');
+
+Route::post('/game/unlock/{fromStage}/{fromLevel}/{toStage}/{toLevel}', [GameController::class, 'processUnlock'])
+    ->name('game.unlock.process');
+Route::get('/reset-session', function () {
+    session()->flush(); // hapus semua session
+    return redirect('/game')->with('status_type', 'success')
+                            ->with('status_msg', 'Session game berhasil direset!');
+});
