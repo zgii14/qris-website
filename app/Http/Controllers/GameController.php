@@ -8,7 +8,7 @@ class GameController extends Controller
 {
     /**
      * Konfigurasi stage & level:
-     * Stage 1–3, masing-masing 3 level.
+     * 3 stage, masing-masing 3 level.
      */
     private array $stages = [
         1 => [
@@ -52,6 +52,13 @@ class GameController extends Controller
                         2 => 'Scan kode QRIS di kasir.',
                         3 => 'Masukkan nominal belanja.',
                         4 => 'Cek nama merchant dan konfirmasi.',
+                    ],
+                    // jawaban benar: tiap baris diisi angka ini
+                    'correct_order' => [
+                        1 => 1,
+                        2 => 2,
+                        3 => 3,
+                        4 => 4,
                     ],
                     'points' => [1 => 150, 2 => 75],
                 ],
@@ -97,6 +104,11 @@ class GameController extends Controller
                         1 => 'Jangan langsung scan dan bayar.',
                         2 => 'Tanya ke kasir/petugas apakah QR tersebut resmi.',
                         3 => 'Gunakan hanya QR yang dipastikan resmi oleh kasir.',
+                    ],
+                    'correct_order' => [
+                        1 => 1,
+                        2 => 2,
+                        3 => 3,
                     ],
                     'points' => [1 => 180, 2 => 90],
                 ],
@@ -145,13 +157,20 @@ class GameController extends Controller
                         4 => 'Masukkan nominal yang sudah disepakati.',
                         5 => 'Cek nama kantin/merchant dan konfirmasi bayar.',
                     ],
+                    'correct_order' => [
+                        1 => 1,
+                        2 => 2,
+                        3 => 3,
+                        4 => 4,
+                        5 => 5,
+                    ],
                     'points' => [1 => 210, 2 => 105],
                 ],
             ],
         ],
     ];
 
-    /* ========= HELPER KOIN & ATTEMPT ========= */
+    /* ========= HELPERS KOIN ========= */
 
     private function getCoins(): int
     {
@@ -169,6 +188,56 @@ class GameController extends Controller
         $this->setCoins($coins);
         return $coins;
     }
+
+    /* ========= HELPERS LEVEL CODE / PROGRESS ========= */
+
+    /** encode level jadi angka, misal stage1-level2 = 12, stage3-level3 = 33 */
+    private function encodeLevel(int $stage, int $level): int
+    {
+        return $stage * 10 + $level;
+    }
+
+    private function getMaxUnlocked(): int
+    {
+        // default: hanya Stage1 Level1 yang kebuka -> 11
+        return session('max_unlocked', 11);
+    }
+
+    private function setMaxUnlocked(int $code): void
+    {
+        session(['max_unlocked' => $code]);
+    }
+
+    private function unlockNext(int $stage, int $level): void
+    {
+        $current = $this->encodeLevel($stage, $level);
+        $max     = $this->getMaxUnlocked();
+
+        // kalau sudah lewat (user replay level lama), tidak usah unlock apa-apa
+        if ($current < $max) {
+            return;
+        }
+
+        // level terakhir: 3-3 -> 33 (tidak ada next)
+        if ($stage === 3 && $level === 3) {
+            return;
+        }
+
+        $next = $current + 1;
+        if ($next > $max) {
+            $this->setMaxUnlocked($next);
+        }
+    }
+
+    private function ensureUnlockedOrAbort(int $stage, int $level): void
+    {
+        $code = $this->encodeLevel($stage, $level);
+        if ($code > $this->getMaxUnlocked()) {
+            abort(403, 'Level ini masih terkunci.');
+        }
+    }
+
+    /* ========= HELPERS ATTEMPT ========= */
 
     private function keyAttempt(int $stage, int $level): string
     {
@@ -197,12 +266,48 @@ class GameController extends Controller
         session(['attempts' => $attempts]);
     }
 
+    /* ========= HELPERS LEVEL COMPLETED ========= */
+
+    private function getCompletedLevels(): array
+    {
+        // format item: "stage-level", contoh: "1-2"
+        return session('completed_levels', []);
+    }
+
+    private function isLevelCompleted(int $stage, int $level): bool
+    {
+        return in_array("{$stage}-{$level}", $this->getCompletedLevels(), true);
+    }
+
+    private function markLevelCompleted(int $stage, int $level): void
+    {
+        $completed = $this->getCompletedLevels();
+        $key       = "{$stage}-{$level}";
+
+        if (!in_array($key, $completed, true)) {
+            $completed[] = $key;
+            session(['completed_levels' => $completed]);
+        }
+    }
+
+    /* ========= UTIL ========= */
+
     private function getLevelConfigOrFail(int $stage, int $level): array
     {
         if (!isset($this->stages[$stage]['levels'][$level])) {
             abort(404);
         }
         return $this->stages[$stage]['levels'][$level];
+    }
+
+    private function humanType(string $type): string
+    {
+        return match ($type) {
+            'multiple_choice' => 'Pilihan ganda',
+            'true_false'      => 'Benar / Salah',
+            'order'           => 'Urutkan langkah',
+            default           => ucfirst($type),
+        };
     }
 
     /* ========= HALAMAN ========= */
@@ -217,14 +322,21 @@ class GameController extends Controller
 
     public function index()
     {
+        $maxUnlocked = $this->getMaxUnlocked();
+
         return view('game.index', [
-            'coins'  => $this->getCoins(),
-            'stages' => $this->stages,
+            'coins'          => $this->getCoins(),
+            'stages'         => $this->stages,
+            'maxUnlocked'    => $maxUnlocked,
+            'currentCode'    => $maxUnlocked,               // posisi pion
+            'completedLevels'=> $this->getCompletedLevels(),// array "stage-level"
         ]);
     }
 
     public function showLevel(int $stage, int $level)
     {
+        $this->ensureUnlockedOrAbort($stage, $level);
+
         return view('game.level', [
             'coins'   => $this->getCoins(),
             'stage'   => $stage,
@@ -236,22 +348,28 @@ class GameController extends Controller
 
     public function submitLevel(Request $request, int $stage, int $level)
     {
+        $this->ensureUnlockedOrAbort($stage, $level);
+
         $config  = $this->getLevelConfigOrFail($stage, $level);
         $attempt = $this->incrementAttempts($stage, $level);
-        $pointsMap = $config['points'] ?? [];
-        $earned    = $pointsMap[$attempt] ?? 0;
 
-        $statusType = 'warning';
-        $statusMsg  = 'Jawaban belum benar, coba lagi.';
+        $statusType      = 'warning';
+        $statusMsg       = 'Jawaban belum benar, coba lagi ya.';
         $showExplanation = false;
+        $earned          = 0;
 
+        // kalau sudah pernah selesai, skor hanya untuk info (tidak tambah koin lagi)
+        $alreadyCompleted = $this->isLevelCompleted($stage, $level);
+
+        /* ==== CEK JAWABAN ==== */
         switch ($config['type']) {
             case 'multiple_choice':
                 $chosen  = $request->input('answer');
                 $correct = $config['correct'];
+
                 if ($chosen === $correct) {
                     $statusType      = 'success';
-                    $statusMsg       = "Jawaban benar! Kamu mendapat {$earned} koin.";
+                    $statusMsg       = 'Jawaban benar! 🎉';
                     $showExplanation = true;
                 }
                 break;
@@ -261,43 +379,71 @@ class GameController extends Controller
                 foreach ($config['statements'] as $key => $st) {
                     $userVal  = $request->input("statement_{$key}");
                     $expected = $st['answer'] ? 'true' : 'false';
+
                     if ($userVal !== $expected) {
                         $allCorrect = false;
                         break;
                     }
                 }
+
                 if ($allCorrect) {
                     $statusType      = 'success';
-                    $statusMsg       = "Jawaban benar semua! Kamu mendapat {$earned} koin.";
+                    $statusMsg       = 'Semua pernyataan sudah kamu jawab dengan tepat! 🎯';
                     $showExplanation = true;
                 }
                 break;
 
             case 'order':
-                $correctSteps = $config['steps'];
-                $correctOrder = array_keys($correctSteps); // [1,2,3,...]
-                $userOrder    = [];
-                foreach ($correctSteps as $idx => $_) {
-                    $userOrder[] = (int) $request->input("step_{$idx}");
+                $correctOrder = $config['correct_order'] ?? [];
+                $allCorrect   = true;
+
+                foreach ($config['steps'] as $idx => $_) {
+                    $userVal    = (int) $request->input("step_{$idx}");
+                    $expected   = (int) ($correctOrder[$idx] ?? 0);
+
+                    if ($userVal !== $expected) {
+                        $allCorrect = false;
+                        break;
+                    }
                 }
-                if ($userOrder === $correctOrder) {
+
+                if ($allCorrect) {
                     $statusType      = 'success';
-                    $statusMsg       = "Urutan sudah tepat! Kamu mendapat {$earned} koin.";
+                    $statusMsg       = 'Urutan langkah kamu sudah tepat! ✅';
                     $showExplanation = true;
                 }
                 break;
         }
 
+        /* ==== KALAU BENAR ==== */
         if ($statusType === 'success') {
-            if ($earned > 0) {
-                $this->addCoins($earned);
+            // hitung koin cuma kalau level belum pernah selesai
+            if (!$alreadyCompleted) {
+                $pointsMap = $config['points'] ?? [];
+                $earned    = $pointsMap[$attempt] ?? ($pointsMap[2] ?? 0); // default pakai poin percobaan 2
+
+                if ($earned > 0) {
+                    $this->addCoins($earned);
+                    $statusMsg .= " Kamu mendapat {$earned} koin. 🪙";
+                }
+            } else {
+                $statusMsg .= ' (Level ini sudah pernah kamu selesaikan, jadi tidak menambah koin lagi.)';
             }
+
+            // tandai selesai dan buka level berikutnya
+            $this->markLevelCompleted($stage, $level);
+            $this->unlockNext($stage, $level);
+
+            // reset attempt untuk level ini
             $this->resetAttempts($stage, $level);
-        } else {
+        }
+        /* ==== KALAU MASIH SALAH ==== */
+        else {
             if ($attempt >= 2) {
+                // setelah 2x salah beruntun, reset attempt biar bisa start ulang
                 $this->resetAttempts($stage, $level);
                 $statusType = 'danger';
-                $statusMsg  = 'Jawaban masih salah dan percobaan sudah habis. Ulangi level ini dari awal.';
+                $statusMsg  = 'Masih salah dan percobaan sudah 2x. Coba ulang level ini dari awal ya. 💪';
             }
         }
 

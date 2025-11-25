@@ -4,64 +4,106 @@
 
 @section('content')
     <section class="section">
+        {{-- JUDUL LEVEL --}}
         <h2 class="animate-on-scroll" style="text-align:center;">
             Stage {{ $stage }} – Level {{ $level }}: {{ $config['title'] }}
         </h2>
 
+        {{-- INFO PERCOBAAN --}}
         <p class="text-muted" style="text-align:center; margin-bottom: 1.5rem;">
             Percobaan ke: <strong>{{ $attempt + 1 }}</strong>
             (maksimal 2x percobaan per level)
         </p>
 
+        {{-- ALERT STATUS JAWABAN --}}
         @if (session('status_msg'))
-            <div class="alert alert-{{ session('status_type', 'info') }}" style="max-width: 700px; margin: 0 auto 1.5rem;">
+            <div class="alert alert-{{ session('status_type', 'info') }}"
+                 style="max-width: 700px; margin: 0 auto 1.5rem;">
                 {{ session('status_msg') }}
             </div>
         @endif
 
+        {{-- KOTAK SOAL --}}
         <div class="register-section animate-on-scroll" style="max-width: 720px; margin: 0 auto;">
             <div class="register-content">
                 <h3 class="register-title" style="text-align:center;">
                     {{ $config['question'] }}
                 </h3>
 
-                <form action="{{ route('game.level.submit', [$stage, $level]) }}" method="POST"
-                    class="level-question-form">
+                <form action="{{ route('game.level.submit', [$stage, $level]) }}"
+                      method="POST"
+                      class="level-question-form">
                     @csrf
 
-                    {{-- Multiple choice --}}
+                    {{-- ===================== 
+                         1. PILIHAN GANDA 
+                       ===================== --}}
                     @if ($config['type'] === 'multiple_choice')
                         @foreach ($config['options'] as $key => $text)
                             <label class="level-option-label">
-                                <input type="radio" name="answer" value="{{ $key }}" required>
-                                <span><strong>{{ $key }}.</strong> {{ $text }}</span>
+                                <input
+                                    type="radio"
+                                    name="answer"
+                                    value="{{ $key }}"
+                                    required
+                                    {{ old('answer') === $key ? 'checked' : '' }}
+                                >
+                                <span>
+                                    <strong>{{ $key }}.</strong> {{ $text }}
+                                </span>
                             </label>
                         @endforeach
                     @endif
 
-                    {{-- True / False --}}
+                    {{-- ===================== 
+                         2. BENAR / SALAH 
+                       ===================== --}}
                     @if ($config['type'] === 'true_false')
                         @foreach ($config['statements'] as $key => $st)
                             <div class="form-field level-tf-field">
-                                <p><strong>Pernyataan {{ $key }}:</strong> {{ $st['text'] }}</p>
-                                <label>
-                                    <input type="radio" name="statement_{{ $key }}" value="true" required>
-                                    Benar
-                                </label>
-                                <label>
-                                    <input type="radio" name="statement_{{ $key }}" value="false" required>
-                                    Salah
-                                </label>
+                                <p style="margin-bottom: 0.4rem;">
+                                    <strong>Pernyataan {{ $key }}:</strong> {{ $st['text'] }}
+                                </p>
+                                <div style="display:flex; gap:1.5rem; flex-wrap:wrap;">
+                                    <label>
+                                        <input
+                                            type="radio"
+                                            name="statement_{{ $key }}"
+                                            value="true"
+                                            required
+                                            {{ old("statement_$key") === 'true' ? 'checked' : '' }}
+                                        >
+                                        Benar
+                                    </label>
+                                    <label>
+                                        <input
+                                            type="radio"
+                                            name="statement_{{ $key }}"
+                                            value="false"
+                                            required
+                                            {{ old("statement_$key") === 'false' ? 'checked' : '' }}
+                                        >
+                                        Salah
+                                    </label>
+                                </div>
                             </div>
                         @endforeach
                     @endif
 
-                    {{-- Order (urutan langkah) --}}
+                    {{-- ===================== 
+                         3. URUTAN LANGKAH 
+                       ===================== --}}
                     @if ($config['type'] === 'order')
                         @foreach ($config['steps'] as $idx => $stepText)
                             <div class="form-field level-order-field">
-                                <input type="number" name="step_{{ $idx }}" min="1"
-                                    max="{{ count($config['steps']) }}" required>
+                                <input
+                                    type="number"
+                                    name="step_{{ $idx }}"
+                                    min="1"
+                                    max="{{ count($config['steps']) }}"
+                                    required
+                                    value="{{ old("step_$idx") }}"
+                                >
                                 <span>{{ $stepText }}</span>
                             </div>
                         @endforeach
@@ -72,7 +114,7 @@
                     </button>
                 </form>
 
-
+                {{-- PEMBAHASAN SINGKAT (setelah benar) --}}
                 @if (session('show_explanation'))
                     <div class="form-message" style="margin-top:1.5rem; display:block;">
                         <strong>Pembahasan singkat:</strong><br>
@@ -83,6 +125,7 @@
             </div>
         </div>
 
+        {{-- LINK KEMBALI --}}
         <div style="margin-top:1.5rem; text-align:center;">
             <a href="{{ route('game.index') }}" class="btn btn-secondary">
                 &larr; Kembali ke daftar Stage
